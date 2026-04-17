@@ -775,19 +775,29 @@ class ComponentScanner:
             is_card_mod = "card-mod" in repo_short
 
             # Check if this plugin is an icon library
-            icon_prefixes: list[str] = []
             community_dir = self.config_dir / "www" / "community"
-            for cname in [repo_short, full_name.split("/")[-1] if "/" in full_name else ""]:
-                if not cname:
-                    continue
-                d = community_dir / cname
-                if d.is_dir():
-                    for js_file in d.glob("*.js"):
-                        icon_prefixes.extend(
-                            await self.hass.async_add_executor_job(
-                                self._extract_icon_prefixes, js_file
-                            )
-                        )
+            candidate_names = [
+                repo_short,
+                full_name.split("/")[-1] if "/" in full_name else "",
+            ]
+
+            def _collect_icon_prefixes(
+                cnames: list[str] = candidate_names,
+                cdir: Path = community_dir,
+            ) -> list[str]:
+                prefixes: list[str] = []
+                for cname in cnames:
+                    if not cname:
+                        continue
+                    d = cdir / cname
+                    if d.is_dir():
+                        for js_file in d.glob("*.js"):
+                            prefixes.extend(self._extract_icon_prefixes(js_file))
+                return prefixes
+
+            icon_prefixes = await self.hass.async_add_executor_job(
+                _collect_icon_prefixes
+            )
 
             is_used = False
             if is_card_mod:
@@ -822,18 +832,21 @@ class ComponentScanner:
                 elif not is_used:
                     # Check if this is a utility (no custom element
                     # definitions found in JS \u2014 only derived from filename)
-                    has_ce = False
-                    for cname in [repo_short, full_name.split("/")[-1] if "/" in full_name else ""]:
-                        if not cname:
-                            continue
-                        d = community_dir / cname
-                        if d.is_dir():
-                            for js_file in d.glob("*.js"):
-                                if self._has_custom_element_calls(js_file):
-                                    has_ce = True
-                                    break
-                        if has_ce:
-                            break
+                    def _check_has_ce(
+                        cnames: list[str] = candidate_names,
+                        cdir: Path = community_dir,
+                    ) -> bool:
+                        for cname in cnames:
+                            if not cname:
+                                continue
+                            d = cdir / cname
+                            if d.is_dir():
+                                for js_file in d.glob("*.js"):
+                                    if self._has_custom_element_calls(js_file):
+                                        return True
+                        return False
+
+                    has_ce = await self.hass.async_add_executor_job(_check_has_ce)
                     if not has_ce:
                         # No custom elements found \u2014 it's a utility plugin.
                         # Mark as used (it's loaded as a resource for a reason).

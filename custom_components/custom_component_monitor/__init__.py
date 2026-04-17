@@ -94,10 +94,14 @@ async def _register_lovelace_resource(hass: HomeAssistant) -> None:
 
     # Build URL with cache-busting tag based on file mtime
     www_path = Path(hass.config.path()) / "www" / DOMAIN / CARD_JS
-    try:
-        mtime = int(www_path.stat().st_mtime * 10)
-    except OSError:
-        mtime = int(time.time() * 10)
+
+    def _get_mtime_tag() -> int:
+        try:
+            return int(www_path.stat().st_mtime * 10)
+        except OSError:
+            return int(time.time() * 10)
+
+    mtime = await hass.async_add_executor_job(_get_mtime_tag)
     card_url = f"{CARD_BASE_PATH}?v={mtime}"
 
     # Check for existing entry (match on base path, ignoring query string)
